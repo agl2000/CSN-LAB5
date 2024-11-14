@@ -1,0 +1,379 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+install.packages("clustAnalytics")
+```
+
+```{r}
+library("igraph")
+library("igraphdata")
+library("clustAnalytics") #contains various methods to assess the quality of clusterings
+```
+
+## Jaccard similarity
+
+Given two different clusterings of the same network, it outputs a table of the Jaccard index between each of their clusters (i.e. a table that includes the Jaccard index between each cluster of labeling 1 and each cluster of labeling 2).
+
+```{r}
+jaccard_sim <- function(GT_clust, clust) {
+  # Get unique cluster labels in both lists
+  unique_GT <- unique(GT_clust)
+  unique_clust <- unique(clust)
+  
+  # Initialize an empty matrix to store Jaccard similarities
+  JS_matrix <- matrix(0, nrow = length(unique_GT), ncol = length(unique_clust))
+  
+  # Compute the Jaccard similarity for each pair of clusters
+  for (i in 1:length(unique_GT)) {
+    for (j in 1:length(unique_clust)) {
+      # Get the nodes in the i-th GT cluster and j-th predicted cluster
+      nodes_GT <- which(GT_clust == unique_GT[i])
+      nodes_clust <- which(clust == unique_clust[j])
+      
+      # Calculate intersection and union of the two sets
+      intersection_size <- length(intersect(nodes_GT, nodes_clust))
+      union_size <- length(union(nodes_GT, nodes_clust))
+      
+      # Calculate Jaccard similarity and store it in the matrix
+      JS_matrix[i, j] <- intersection_size / union_size
+    }
+  }
+  
+  # Set row and column names for the matrix
+  rownames(JS_matrix) <- paste("Cluster", unique_GT)
+  colnames(JS_matrix) <- paste("Cluster", unique_clust)
+  
+  return(JS_matrix)
+}
+```
+
+## Match clusters
+
+For each cluster of labeling 1, identifies which is the cluster of labeling 2 that is more similar according to the Jaccard index, and returns all these indices indicating which clusters they correspond to.
+
+```{r}
+match_clusters <- function(JS_matrix, name_GT="GT", name_alg="alg") {
+  # Initialize an empty list to store the matching pairs
+  MC_list <- list()
+  
+  # Loop over each cluster in the ground truth (GT) (rows of JS_matrix)
+  for (i in 1:nrow(JS_matrix)) {
+    # Find the index of the cluster in 'alg' with the highest Jaccard similarity for cluster i in 'GT'
+    best_match_index <- which.max(JS_matrix[i, ])
+    
+    # Get the name of the clusters
+    GT_cluster_name <- paste(name_GT, i, sep = ".")
+    alg_cluster_name <- paste(name_alg, best_match_index, sep = ".")
+    
+    # Get the Jaccard similarity value
+    similarity_value <- JS_matrix[i, best_match_index]
+    
+    # Create a named entry in the list with the cluster pair and similarity
+    MC_list[[paste("(", GT_cluster_name, ",", alg_cluster_name, ")", sep = "")]] <- similarity_value
+  }
+  
+  # Convert the list to a named vector (keys are the cluster pairs, values are the similarity values)
+  MC_vector <- unlist(MC_list)
+  
+  # Convert the vector to a matrix format (one row with the Jaccard similarity values)
+  MC_matrix <- matrix(MC_vector, nrow = 1)
+  
+  # Set the column names to be the cluster pairs
+  colnames(MC_matrix) <- names(MC_vector)
+  
+  # Return the matrix
+  return(MC_matrix)
+}
+```
+
+## Weighted mean
+
+Computes the weighted mean of the vector of values output by previous function (weights given by fraction of number of nodes in each cluster).
+
+This quantity we will consider as the (global) Jaccard similarity of the two clusterings.
+
+```{r}
+Wmean <- function(MC_matrix, GT_clust, clust, algorithm_name) {
+  # Initialize variables
+  total_weighted_similarity <- 0
+  total_weight <- 0
+  
+  # Extract cluster pair names from the column names of the MC_matrix
+  cluster_pairs <- colnames(MC_matrix)
+  
+  # Loop over each cluster pair to calculate weighted similarity
+  for (pair in cluster_pairs) {
+    # Remove parentheses first
+    clean_pair <- gsub("[()]", "", pair)
+    
+    # Split the pair into GT and algorithm cluster parts
+    gt_cluster <- as.numeric(sub("GT\\.", "", strsplit(clean_pair, ",")[[1]][1]))  # Remove "GT." and convert to numeric
+    lv_cluster <- as.numeric(sub(paste0(algorithm_name, "\\."), "", strsplit(clean_pair, ",")[[1]][2]))  # Remove dynamic algorithm prefix
+    
+    # Get the size of the clusters (number of nodes)
+    gt_size <- sum(GT_clust == gt_cluster)
+    lv_size <- sum(clust == lv_cluster)
+    
+    # Calculate the weight for the cluster pair (fraction of nodes in both clusters)
+    weight <- gt_size / length(GT_clust) + lv_size / length(clust)
+    
+    # Get the Jaccard similarity value from the matrix
+    similarity_value <- MC_matrix[1, pair]
+    
+    # Update the weighted sum
+    total_weighted_similarity <- total_weighted_similarity + (weight * similarity_value)
+    total_weight <- total_weight + weight
+  }
+  
+  # Calculate the weighted mean
+  w_mean_value <- total_weighted_similarity / total_weight
+  
+  return(w_mean_value)
+}
+```
+
+## Alternative to global Jaccard similarity
+
+```{r}
+# TODO: Think about an alternative.
+# Can you think of another way of combining the vector of Jaccard indices obtained in match_clusters() to quantify clusterings similarity?
+```
+
+# Load/generate datasets
+
+```{r}
+# Karate
+data(karate,package="igraphdata")
+# Synthetic network: scale-free degree distribution, 200 nodes, 800 edges and 4 communities
+B <- matrix(c(1, 0.5, 0.3, 0.1,
+              0.5, 1, 0.4, 0.8,
+              0.3, 0.4, 1, 0.7,
+              0.1, 0.8, 0.7, 1), ncol=4)
+synthetic_graph <- barabasi_albert_blocks(m=4, p=c(0.25, 0.25, 0.25, 0.25), B=B, t_max=200,
+                     type="Hajek", sample_with_replacement = FALSE)
+# ENRON
+data(enron,package="igraphdata")
+enron_adj <- as_adjacency_matrix(as.undirected(enron,mode = "each"))
+enron_graph <- graph_from_adjacency_matrix(enron_adj, mode = "undirected", diag = FALSE)
+
+
+#TODO: A network of your choice with no known community structure. You can use networks from network repositories available in the web or from the igraphdata package.
+
+```
+
+## Define functions
+
+```{r}
+get_cluster_memberships_from_graph <- function(graph, algorithm) {
+  
+  # Clustering using Walktrap
+  if (algorithm == "walktrap") {
+    results <- cluster_walktrap(graph)
+  }
+  
+  # Clustering using Betweenness
+  else if (algorithm == "betweenness") {
+    results <- cluster_edge_betweenness(graph)
+  }
+  
+  # Clustering using Fast Greedy
+  else if (algorithm == "fastgreedy") {
+    results <- cluster_fast_greedy(graph)
+  }
+  
+  # Clustering using Label Propagation
+  else if (algorithm == "propagation") {
+    results <- cluster_label_prop(graph)
+  }
+  
+  # Clustering using Eigenvector
+  else if (algorithm == "eigenvector") {
+    results <- cluster_eigenvector(graph)
+  }
+  
+  # Clustering using Multilevel
+  else if (algorithm == "multilevel") {
+    results <- cluster_multilevel(graph)
+  }
+  
+  # Clustering using Optimal (Modularity-based)
+  else if (algorithm == "optimal") {
+    results <- cluster_optimal(graph)
+  }
+  
+  # Clustering using Spinglass
+  else if (algorithm == "spinglass") {
+    results <- cluster_spinglass(graph)
+  }
+  
+  # Clustering using Infomap
+  else if (algorithm == "infomap") {
+    results <- cluster_infomap(graph)
+  }
+  
+  # Check if the algorithm provided is valid
+  else {
+    stop("Invalid algorithm specified. Please choose one of: 'walktrap', 'betweenness', 'fastgreedy', 'propagation', 'eigenvector', 'multilevel', 'optimal', 'spinglass', 'infomap'.")
+  }
+  cluster_list <- unname(membership(results))
+  # Return the clustering result
+  return(cluster_list)
+}
+
+```
+
+```{r}
+evaluate_significance(enron_graph)
+```
+
+```{r}
+karate_alg <- "walktrap"
+synthetic_graph_alg <- "walktrap"
+enrong_alg <- "walktrap"
+```
+
+```{r}
+clust_members_karate <- get_cluster_memberships_from_graph(karate, karate_alg)
+```
+
+```{r}
+JS_karate <- jaccard_sim(V(karate)$Faction, clust_members_karate)
+```
+
+```{r}
+MC_karate <- match_clusters(JS_karate, "GT", karate_alg)
+```
+
+```{r}
+w_mean_karate <- Wmean(MC_karate, V(karate)$Faction, clust_members_karate, karate_alg)
+```
+
+## 1. Define the algorithms we want to use
+
+```{r}
+algorithm_functions <- list(
+  walktrap = cluster_walktrap,
+  betweenness = cluster_edge_betweenness,
+  #fastgreedy = cluster_fast_greedy,
+  propagation = cluster_label_prop,
+  #eigenvector = cluster_eigenvector,
+  multilevel = cluster_louvain
+  #optimal = cluster_optimal,
+  #spinglass = cluster_spinglass,
+  #infomap = cluster_infomap
+)
+```
+
+## 2. Define the scoring functions we want to use to evaluate the clustering significance (a representative of each class) + Jaccard similarity (local and global)
+
+```{r}
+#Internal connectivity (high is best)
+int_cnctvty <- c(
+  "clustering coef",
+  "internal density",
+  "edges inside",
+  "av degree",
+  "FOMD"
+)
+#External connectivity (low is best)
+ext_cnctvty <- c(
+  "expansion",
+  "cut ratio"
+)
+#Combine internal and external connectivity (low is best)
+int_ext_cnctvty <- c(
+  "conductance",
+  "norm cut",
+  "max ODF",
+  "average ODF",
+  "flake ODF"
+)
+#Based on a network model (high is best)
+net_model <- c(
+  "modularity"
+)
+```
+
+## 3. Find a good reference clustering for each network
+
+-   Ground truth for Karate and Synthetic graph
+
+-   Best ranked clustering (according to your selected group of scoring functions) for ENRON and the other.
+
+    ```{r}
+    find_best_algorithm <- function(matrix, int_cnctvty, ext_cnctvty, int_ext_cnctvty, net_model) {
+      # Extract the algorithms dynamically from the column names
+      algorithms <- colnames(matrix)
+      
+      best_scores <- sapply(algorithms, function(alg) {
+        
+        # Initialize counters for best scores
+        best_count <- 0
+        
+        # Iterate over internal connectivity functions
+        for (metric in int_cnctvty) {
+          # Check if the current algorithm's score is the highest for this metric
+          if (matrix[metric, alg] == max(matrix[metric, algorithms])) {
+            best_count <- best_count + 1
+          }
+        }
+        
+        # Iterate over external connectivity functions
+        for (metric in ext_cnctvty) {
+          # Check if the current algorithm's score is the lowest for this metric
+          if (matrix[metric, alg] == min(matrix[metric, algorithms])) {
+            best_count <- best_count + 1
+          }
+        }
+        
+        # Iterate over combined internal-external connectivity functions
+        for (metric in int_ext_cnctvty) {
+          # Check if the current algorithm's score is the lowest for this metric
+          if (matrix[metric, alg] == min(matrix[metric, algorithms])) {
+            best_count <- best_count + 1
+          }
+        }
+        
+        # Iterate over network model functions (modularity)
+        for (metric in net_model) {
+          # Check if the current algorithm's score is the highest for this metric
+          if (matrix[metric, alg] == max(matrix[metric, algorithms])) {
+            best_count <- best_count + 1
+          }
+        }
+        
+        return(best_count)
+      })
+      
+      # Find the algorithm with the maximum number of best scores
+      best_algorithm <- names(best_scores)[which.max(best_scores)]
+      return(best_algorithm)
+    }
+    ```
+
+```{r}
+#Find best algorithm to get the clustering GT
+no_clustering_coef_flag <- !("clustering coef" %in% int_cnctvty)
+all_scores <- evaluate_significance(
+  karate,
+  alg_list=algorithm_functions,
+  no_clustering_coef = no_clustering_coef_flag
+  )
+all_interested_metrics <- c(int_cnctvty, ext_cnctvty, int_ext_cnctvty, net_model)
+scores <- all_scores[rownames(all_scores) %in% all_interested_metrics, ]
+best_algorithm <- find_best_algorithm(scores, int_cnctvty, ext_cnctvty, int_ext_cnctvty, net_model)
+best_algorithm
+```
+
+## 4. Evaluate
+
+```{r}
+all_scores <- evaluate_significance(karate,
+                      alg_list=algorithm_functions,
+                      gt_clustering=V(karate)$Faction)
+all_interested_metrics <- c(int_cnctvty, ext_cnctvty, int_ext_cnctvty)
+scores <- all_scores[rownames(all_scores) %in% all_interested_metrics, ]
+```
