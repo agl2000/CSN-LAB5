@@ -43,8 +43,8 @@ jaccard_sim <- function(GT_clust, clust) {
   }
   
   # Set row and column names for the matrix
-  rownames(JS_matrix) <- paste("Cluster", unique_GT)
-  colnames(JS_matrix) <- paste("Cluster", unique_clust)
+  rownames(JS_matrix) <- paste(unique_GT)
+  colnames(JS_matrix) <- paste(unique_clust)
   
   return(JS_matrix)
 }
@@ -65,8 +65,8 @@ match_clusters <- function(JS_matrix, name_GT="GT", name_alg="alg") {
     best_match_index <- which.max(JS_matrix[i, ])
     
     # Get the name of the clusters
-    GT_cluster_name <- paste(name_GT, i, sep = ".")
-    alg_cluster_name <- paste(name_alg, best_match_index, sep = ".")
+    GT_cluster_name <- paste(name_GT, rownames(JS_matrix)[i], sep = ".")
+    alg_cluster_name <- paste(name_alg, colnames(JS_matrix)[best_match_index], sep = ".")
     
     # Get the Jaccard similarity value
     similarity_value <- JS_matrix[i, best_match_index]
@@ -138,15 +138,46 @@ Wmean <- function(MC_matrix, GT_clust, clust, algorithm_name) {
 ## Alternative to global Jaccard similarity
 
 ```{r}
-# TODO: Think about an alternative.
+
 # Can you think of another way of combining the vector of Jaccard indices obtained in match_clusters() to quantify clusterings similarity?
+
+# Harmonic Mean for Global Jaccard Similarity
+harmonic_mean <- function(MC_matrix, GT_clust, clust, algorithm_name) {
+  # Extract similarities from the match clusters matrix
+  similarities <- as.numeric(MC_matrix)
+  # Calculate harmonic mean
+  harmonic_mean_value <- length(similarities) / sum(1 / similarities)
+  return(harmonic_mean_value)
+}
+
 ```
+
+# Code to plot a graph and its clustering
+```{r}
+# Plot community structure for a given graph and clustering
+plot_communities <- function(graph, clustering, title) {
+  plot(graph, vertex.color = clustering, main = title, vertex.label = NA, vertex.size = 10)
+}
+
+# Plot dendrogram for hierarchical clustering
+plot_dendrogram <- function(graph, algorithm) {
+  if (algorithm == "fastgreedy") {
+    dendrogram <- cluster_fast_greedy(graph)
+    dendPlot(dendrogram)
+  } else {
+    message("Dendrogram not supported for this algorithm.")
+  }
+}
+```
+
 
 # Load/generate datasets
 
 ```{r}
 # Karate
 data(karate,package="igraphdata")
+plot(karate,main = "Karate Network")
+
 # Synthetic network: scale-free degree distribution, 200 nodes, 800 edges and 4 communities
 B <- matrix(c(1, 0.5, 0.3, 0.1,
               0.5, 1, 0.4, 0.8,
@@ -154,13 +185,21 @@ B <- matrix(c(1, 0.5, 0.3, 0.1,
               0.1, 0.8, 0.7, 1), ncol=4)
 synthetic_graph <- barabasi_albert_blocks(m=4, p=c(0.25, 0.25, 0.25, 0.25), B=B, t_max=200,
                      type="Hajek", sample_with_replacement = FALSE)
+plot(synthetic_graph,main = "Synthetic Network")
+
 # ENRON
 data(enron,package="igraphdata")
 enron_adj <- as_adjacency_matrix(as.undirected(enron,mode = "each"))
 enron_graph <- graph_from_adjacency_matrix(enron_adj, mode = "undirected", diag = FALSE)
+plot(enron_graph, main="Enron Network")
 
 
-#TODO: A network of your choice with no known community structure. You can use networks from network repositories available in the web or from the igraphdata package.
+#Custom graph (UK faculty)
+
+data("UKfaculty",package="igraphdata")
+undirected_graph <- as.undirected(UKfaculty, mode = "collapse")  # Combine directed edges into one undirected edge
+plot(undirected_graph,main = "UKfaculty Network",vertex.label=NA)
+custom_graph<-undirected_graph
 
 ```
 
@@ -196,7 +235,7 @@ get_cluster_memberships_from_graph <- function(graph, algorithm) {
   
   # Clustering using Multilevel
   else if (algorithm == "multilevel") {
-    results <- cluster_multilevel(graph)
+    results <- cluster_louvain(graph)
   }
   
   # Clustering using Optimal (Modularity-based)
@@ -225,45 +264,21 @@ get_cluster_memberships_from_graph <- function(graph, algorithm) {
 
 ```
 
-```{r}
-evaluate_significance(enron_graph)
-```
 
-```{r}
-karate_alg <- "walktrap"
-synthetic_graph_alg <- "walktrap"
-enrong_alg <- "walktrap"
-```
-
-```{r}
-clust_members_karate <- get_cluster_memberships_from_graph(karate, karate_alg)
-```
-
-```{r}
-JS_karate <- jaccard_sim(V(karate)$Faction, clust_members_karate)
-```
-
-```{r}
-MC_karate <- match_clusters(JS_karate, "GT", karate_alg)
-```
-
-```{r}
-w_mean_karate <- Wmean(MC_karate, V(karate)$Faction, clust_members_karate, karate_alg)
-```
 
 ## 1. Define the algorithms we want to use
 
 ```{r}
 algorithm_functions <- list(
-  walktrap = cluster_walktrap,
-  betweenness = cluster_edge_betweenness,
+  walktrap = cluster_walktrap, #is asked
+ betweenness = cluster_edge_betweenness, #is asked
   #fastgreedy = cluster_fast_greedy,
-  propagation = cluster_label_prop,
+  propagation = cluster_label_prop, #is asked
   #eigenvector = cluster_eigenvector,
-  multilevel = cluster_louvain
+ multilevel = cluster_louvain, #is asked
   #optimal = cluster_optimal,
   #spinglass = cluster_spinglass,
-  #infomap = cluster_infomap
+  infomap = cluster_infomap
 )
 ```
 
@@ -316,32 +331,40 @@ net_model <- c(
         # Iterate over internal connectivity functions
         for (metric in int_cnctvty) {
           # Check if the current algorithm's score is the highest for this metric
-          if (matrix[metric, alg] == max(matrix[metric, algorithms])) {
-            best_count <- best_count + 1
+          if (!any(is.na(matrix[metric, ]))) { # Skip if all values are NA
+            if (matrix[metric, alg] == max(matrix[metric,])) {
+              best_count <- best_count + 1
+            }
           }
         }
         
         # Iterate over external connectivity functions
         for (metric in ext_cnctvty) {
           # Check if the current algorithm's score is the lowest for this metric
-          if (matrix[metric, alg] == min(matrix[metric, algorithms])) {
-            best_count <- best_count + 1
+          if (!any(is.na(matrix[metric, ]))) { # Skip if all values are NA
+            if (matrix[metric, alg] == min(matrix[metric,])) {
+              best_count <- best_count + 1
+            }
           }
         }
         
         # Iterate over combined internal-external connectivity functions
         for (metric in int_ext_cnctvty) {
           # Check if the current algorithm's score is the lowest for this metric
-          if (matrix[metric, alg] == min(matrix[metric, algorithms])) {
-            best_count <- best_count + 1
+          if (!any(is.na(matrix[metric, ]))) { # Skip if all values are NA
+            if (matrix[metric, alg] == min(matrix[metric,])) {
+              best_count <- best_count + 1
+            }
           }
         }
         
         # Iterate over network model functions (modularity)
         for (metric in net_model) {
           # Check if the current algorithm's score is the highest for this metric
-          if (matrix[metric, alg] == max(matrix[metric, algorithms])) {
-            best_count <- best_count + 1
+          if (!any(is.na(matrix[metric, ]))) { # Skip if all values are NA
+            if (matrix[metric, alg] == max(matrix[metric,])) {
+              best_count <- best_count + 1
+            }
           }
         }
         
@@ -350,30 +373,182 @@ net_model <- c(
       
       # Find the algorithm with the maximum number of best scores
       best_algorithm <- names(best_scores)[which.max(best_scores)]
+      print(best_scores)
       return(best_algorithm)
     }
     ```
 
 ```{r}
-#Find best algorithm to get the clustering GT
-no_clustering_coef_flag <- !("clustering coef" %in% int_cnctvty)
-all_scores <- evaluate_significance(
-  karate,
-  alg_list=algorithm_functions,
-  no_clustering_coef = no_clustering_coef_flag
-  )
+#Find best algorithm to get the clustering GT of ENRON and custom
+
+# Define metrics of interest
 all_interested_metrics <- c(int_cnctvty, ext_cnctvty, int_ext_cnctvty, net_model)
-scores <- all_scores[rownames(all_scores) %in% all_interested_metrics, ]
-best_algorithm <- find_best_algorithm(scores, int_cnctvty, ext_cnctvty, int_ext_cnctvty, net_model)
-best_algorithm
+
+
+# Evaluate significance and determine the best algorithm for ENRON
+no_clustering_coef_flag <- !("clustering coef" %in% int_cnctvty)
+enron_scores <- evaluate_significance(
+  enron_graph,
+  alg_list = algorithm_functions,
+  no_clustering_coef = no_clustering_coef_flag
+)
+enron_scores_filtered <- enron_scores[rownames(enron_scores) %in% all_interested_metrics, ]
+enron_best_algorithm <- find_best_algorithm(
+  enron_scores_filtered, int_cnctvty, ext_cnctvty, int_ext_cnctvty, net_model
+)
+print(paste("Best algorithm for ENRON:", enron_best_algorithm))
+
+
+
+# Evaluate significance and determine the best algorithm for Custom Network
+custom_scores <- evaluate_significance(
+  custom_graph,
+  alg_list = algorithm_functions,
+  no_clustering_coef = no_clustering_coef_flag
+)
+custom_scores_filtered <- custom_scores[rownames(custom_scores) %in% all_interested_metrics, ]
+custom_best_algorithm <- find_best_algorithm(
+  custom_scores_filtered, int_cnctvty, ext_cnctvty, int_ext_cnctvty, net_model
+)
+print(paste("Best algorithm for Custom Network:", custom_best_algorithm))
+
+# Extract GT clustering based on the best algorithm
+enron_GT <- get_cluster_memberships_from_graph(enron_graph, enron_best_algorithm)
+custom_GT <- get_cluster_memberships_from_graph(custom_graph, custom_best_algorithm)
+
+# Print results
+print("ENRON GT Clustering:")
+plot(enron_GT)
+
+print("Custom Network GT Clustering:")
+plot(custom_GT)
+
+
 ```
+```{r}
+plot_communities(
+  custom_graph, 
+  custom_GT,  # Use your clustering results
+  "Custom Graph with Clustering"
+)
+
+plot_communities(
+  enron_graph, 
+  enron_GT,  # Use your clustering results
+  "Enron Graph with Clustering"
+)
+```
+
+
+
 
 ## 4. Evaluate
 
 ```{r}
-all_scores <- evaluate_significance(karate,
-                      alg_list=algorithm_functions,
-                      gt_clustering=V(karate)$Faction)
-all_interested_metrics <- c(int_cnctvty, ext_cnctvty, int_ext_cnctvty)
-scores <- all_scores[rownames(all_scores) %in% all_interested_metrics, ]
+
+plot_communities(
+  custom_graph, 
+  custom_GT,  # Use your clustering results
+  "Custom Graph with Clustering"
+)
+
+visualize_results("net_name",custom_graph, custom_scores)
+# Visualize all networks
+for (net_name in names(networks)) {
+  graph <- networks[[net_name]]$graph
+  results <- all_results[[net_name]]
+  visualize_results(net_name, graph, results)
+}
+
+
 ```
+
+
+```{r}
+# Evaluate networks
+evaluate_network <- function(graph, ground_truth = NULL, algorithms = algorithm_functions) {
+  results <- list()
+  metrics<-evaluate_significance(graph,alg_list = algorithm_functions)
+  for (alg_name in names(algorithms)) {
+    
+    clustering <- get_cluster_memberships_from_graph(graph, alg_name)
+    
+    if (!is.null(ground_truth)) {
+      # Compare with ground truth
+      JS_matrix <- jaccard_sim(ground_truth, clustering)
+      MC <- match_clusters(JS_matrix, "GT", alg_name)
+      weighted_js <- Wmean(MC, ground_truth, clustering, alg_name)
+      harmonic_js <- harmonic_mean(MC)
+    } else {
+      # Compare with best clustering (to be determined)
+      weighted_js <- NA
+      harmonic_js <- NA
+    }
+    
+    results[[alg_name]] <- list(
+      clustering = clustering,
+      weighted_js = weighted_js,
+      harmonic_js = harmonic_js,
+      metrics = metrics
+    )
+  }
+  return(results)
+}
+
+# Prepare networks
+networks <- list(
+  karate = list(graph = karate, ground_truth = V(karate)$Faction),
+  synthetic = list(graph = synthetic_graph, ground_truth = V(synthetic_graph)$label),
+  enron = list(graph = enron_graph, ground_truth = enron_GT),
+  custom = list(graph = custom_graph, ground_truth = custom_GT)
+)
+
+# Evaluate all networks
+all_results <- lapply(names(networks), function(net_name) {
+  network <- networks[[net_name]]
+  evaluate_network(network$graph, network$ground_truth)
+})
+
+```
+
+
+
+```{r}
+# Summarize results into a table
+summarize_JS <- function(network_name, results) {
+  summary <- data.frame(
+    Algorithm = names(results),
+    Weighted_JS = sapply(results, function(r) r$weighted_js),
+    Harmonic_JS = sapply(results, function(r) r$harmonic_js)
+  )
+  print(paste("Results for", network_name))
+  # print(summary)
+  return(summary)
+}
+
+summarize_metrics <- function(network_name, results) {
+  summary <- metrics = results$walktrap$metrics
+  
+  print(paste("Results for", network_name))
+  # print(summary)
+  return(summary)
+}
+
+  
+i=1
+for (name in names(networks)){
+    print(name)
+    print(summarize_JS(name, all_results[[i]]))
+    print(all_results[[i]]$walktrap$metrics)
+  i=i+1
+}
+
+ 
+
+```
+
+
+
+
+
+
